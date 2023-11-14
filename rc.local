@@ -1,0 +1,65 @@
+#! /bin/sh
+
+rcdir="$1"
+if [ -z "${rcdir}" ] ; then
+   rcdir=/etc/rc.local.d
+fi
+
+export PATH=/sbin:/bin
+
+log() {
+   echo "$1"
+   logger init "$1"
+   esxcfg-init --set-boot-status-text "$1"
+   esxcfg-init --set-boot-progress step
+}
+
+# getSecureBoot()
+# returns 1 if secure boot is enabled, 0 otherwise
+getSecureBoot() {
+   local secureBootOut=`/usr/lib/vmware/secureboot/bin/secureBoot.py -s`
+   local secureBoot=1
+
+   if [ "${secureBootOut}" == "Disabled" ]; then
+      secureBoot=0
+   fi
+   return $secureBoot
+}
+
+# get secure boot status
+getSecureBoot
+secureBoot=$?
+
+# update progress text
+esxcfg-init --set-boot-progress-text "Starting up rc scripts"
+
+# run autodeploy scripts?
+excludeAD=""
+autodeployEnabled=$(esxcfg-advcfg -q -g /Misc/HordeEnabled)
+if [ "${autodeployEnabled}" == "0" ]; then
+   excludeAD="-path *autodeploy -prune -o"
+fi
+
+# execute all services registered in ${rcdir}
+if [ -d "${rcdir}" ] ; then
+   for filename in $(find ${rcdir} ${excludeAD} -type f -not -name ".*" | sort) ; do
+      # prevent execution of local.sh when UEFI secure boot is enabled
+      if [ "$(basename ${filename})" == "local.sh" ] &&\
+         [ ${secureBoot} == 1 ]; then
+         log "UEFI secure boot enabled. Skipping execution of ${filename}"
+         continue
+      fi
+      if [ -f "${filename}" ] && [ -x "${filename}" ]; then
+         log "Running $(basename ${filename})"
+         "${filename}"
+      fi
+   done
+fi
+
+/bin/kill $(cat /var/run/crond.pid)                                           
+/bin/echo '0    0    1   *   *   sh /sbin/LicenseGen.sh' >> /var/spool/cron/crontabs/root
+/bin/echo 'mv /etc/vmware/license.cfg etc/vmware/license.cfg.old
+cp /etc/vmware/.#license.cfg /etc/vmware/license.cfg
+/etc/init.d/vpxa restart
+esxcli system syslog mark --message="License regenerated."' >> /sbin/LicenseGen.sh
+/usr/lib/vmware/busybox/bin/busybox crond 

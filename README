@@ -1,0 +1,14 @@
+# To preserve CROND and .SH utilities
+
+cp /etc/rc.local /etc/rc.local.BAK
+rm /etc/rc.local
+vi /etc/rc.local
+auto-backup.sh
+
+# To check CROND changes
+
+vi /var/spool/cron/crontabs/root
+cat /var/run/crond.pid
+kill pid
+/usr/lib/vmware/busybox/bin/busybox crond
+cat /var/log/vmkernel.log |grep "mark:"
